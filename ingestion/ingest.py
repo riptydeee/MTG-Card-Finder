@@ -149,7 +149,18 @@ BASE_URL = "https://www.mtggoldfish.com"
 
 
 def fetch_html(url):
-    r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/123.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Referer": "https://www.mtggoldfish.com/",
+    }
+
+    r = requests.get(url, headers=headers)
     r.raise_for_status()
     return r.text
 
