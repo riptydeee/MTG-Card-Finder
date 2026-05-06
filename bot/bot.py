@@ -2,7 +2,7 @@ import discord
 from discord import app_commands
 import sqlite3
 
-DB_PATH = "cards.db"
+DB_PATH = "ingestion/cards.db"
 
 # -----------------------------
 # Database helpers
