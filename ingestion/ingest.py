@@ -64,7 +64,7 @@ def fetch_card_metadata(card_name):
     r = requests.get(url)
 
     if r.status_code != 200:
-        print(f"  [Scryfall] Warning: Could not find card '{card_name}' (status {r.status_code})")
+        print(f"  [Scryfall] Warning: Could not find card '{card_name}'")
         return None
 
     data = r.json()
@@ -150,7 +150,6 @@ def parse_tournament_decks(tournament_url):
         if not href:
             continue
 
-        # Skip visual pages
         if "/deck/visual/" in href:
             continue
 
@@ -163,55 +162,30 @@ def parse_tournament_decks(tournament_url):
     return deck_links
 
 
+# -----------------------------
+# 5. CARD PARSER (2026 STRUCTURE)
+# -----------------------------
 def parse_cards_from_deck(soup):
-    """
-    MTGGoldfish currently renders deck rows as text blocks like:
-      "4 Sheoldred, the Apocalypse"
-      "3x Cut Down"
-    inside elements that often share a common class or structure.
-
-    We fall back to a robust text-based parser:
-    - Look for elements that look like card rows
-    - Parse "qty name" or "qtyx name"
-    """
     card_dict = {}
 
-    # Try specific row-like containers first
-    candidates = []
+    rows = soup.select(".deck-view-card-row")
 
-    # Common container patterns (adjustable if layout shifts)
-    candidates.extend(soup.select(".deck-view-card-row"))
-    candidates.extend(soup.select(".deck-view-deck-table-row"))
-    candidates.extend(soup.select(".deck-view-deck-table td"))
-    candidates.extend(soup.select(".deck-view-deck-table tr"))
+    for row in rows:
+        qty_el = row.select_one(".deck-col-qty")
+        name_el = row.select_one(".deck-col-card")
 
-    # Fallback: if nothing matched, scan all <li> and <div> that look like "4 Card Name"
-    if not candidates:
-        candidates.extend(soup.find_all(["li", "div", "span"]))
-
-    for el in candidates:
-        text = el.get_text(" ", strip=True)
-        if not text:
+        if not qty_el or not name_el:
             continue
 
-        # Very rough filter: must start with a number
-        first = text.split(" ", 1)[0]
-        first_clean = first.replace("x", "").strip()
-        if not first_clean.isdigit():
-            continue
+        qty_text = qty_el.get_text(strip=True).replace("x", "")
+        name_text = name_el.get_text(strip=True)
 
         try:
-            qty = int(first_clean)
-        except ValueError:
+            qty = int(qty_text)
+        except:
             continue
 
-        # Get the rest as the card name
-        rest = text[len(first):].strip()
-        if not rest:
-            continue
-
-        card_name = rest
-        card_dict[card_name] = card_dict.get(card_name, 0) + qty
+        card_dict[name_text] = card_dict.get(name_text, 0) + qty
 
     return card_dict
 
@@ -220,7 +194,6 @@ def parse_deck_page(deck_url):
     html = fetch_html(deck_url)
     soup = BeautifulSoup(html, "html.parser")
 
-    # Player + archetype + event
     title = soup.select_one(".deck-view-title")
     event_name = title.get_text(" ", strip=True) if title else "Unknown Event"
 
@@ -239,30 +212,11 @@ def parse_deck_page(deck_url):
 
 
 # -----------------------------
-# 5. MATCH RESULTS (OPTIONAL)
-# -----------------------------
-def ingest_match_results(conn, match_df):
-    cur = conn.cursor()
-
-    for _, row in match_df.iterrows():
-        deck_id = row["deck_id"]
-        result = row["result"]
-
-        if result == "W":
-            cur.execute("UPDATE decks SET wins = wins + 1 WHERE deck_id = ?", (deck_id,))
-        else:
-            cur.execute("UPDATE decks SET losses = losses + 1 WHERE deck_id = ?", (deck_id,))
-
-    conn.commit()
-
-
-# -----------------------------
 # 6. MAIN INGESTION FLOW
 # -----------------------------
 if __name__ == "__main__":
     conn = init_db()
 
-    # You can change this to any MTGGoldfish tournament URL
     tournament_url = "https://www.mtggoldfish.com/tournament/pro-tour-murders-at-karlov-manor#paper"
     print("Scraping tournament:", tournament_url)
 
@@ -293,8 +247,7 @@ if __name__ == "__main__":
 
             print(f"  -> Ingested {len(card_dict)} cards for {player} ({archetype})")
 
-            # Be polite to MTGGoldfish and Scryfall
-            time.sleep(0.8)
+            time.sleep(1.0)
 
         except Exception as e:
             print("  -> Error scraping deck:", e)
