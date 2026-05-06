@@ -193,47 +193,43 @@ def parse_tournament_decks(tournament_url):
 
 
 def parse_deck_page(deck_url):
-    """
-    Returns:
-      player, archetype, event_name, card_dict
-    card_dict = { "Card Name": count, ... }
-    """
     html = fetch_html(deck_url)
     soup = BeautifulSoup(html, "html.parser")
 
-    # Title area usually contains event + archetype
-    title = soup.select_one("h1")
-    event_name = title.get_text(strip=True) if title else "Unknown Event"
+    # Player + archetype
+    header = soup.select_one(".deck-view-title")
+    if header:
+        title_text = header.get_text(" ", strip=True)
+    else:
+        title_text = "Unknown Event"
 
-    # Player + archetype often in subtitle
     subtitle = soup.select_one(".deck-view-title-subtitle")
-    player = "Unknown Player"
-    archetype = "Unknown Archetype"
     if subtitle:
-        parts = [p.strip() for p in subtitle.get_text("•", strip=True).split("•") if p.strip()]
-        if len(parts) >= 1:
-            player = parts[0]
-        if len(parts) >= 2:
-            archetype = parts[1]
+        parts = subtitle.get_text("•", strip=True).split("•")
+        player = parts[0] if len(parts) > 0 else "Unknown Player"
+        archetype = parts[1] if len(parts) > 1 else "Unknown Archetype"
+    else:
+        player = "Unknown Player"
+        archetype = "Unknown Archetype"
 
     card_dict = {}
 
     # Mainboard table
-    for row in soup.select("table.deck-view-deck-table tr"):
+    for row in soup.select("table.deck-view-deck-table tbody tr"):
         cols = row.find_all("td")
         if len(cols) < 2:
             continue
-        # First col: count, second: card name
+
         try:
             count = int(cols[0].get_text(strip=True))
-        except ValueError:
+        except:
             continue
-        name = cols[1].get_text(strip=True)
-        if not name:
-            continue
-        card_dict[name] = card_dict.get(name, 0) + count
 
-    return player, archetype, event_name, card_dict
+        name = cols[1].get_text(strip=True)
+        if name:
+            card_dict[name] = card_dict.get(name, 0) + count
+
+    return player, archetype, title_text, card_dict
 
 
 # -----------------------------
