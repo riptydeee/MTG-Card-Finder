@@ -141,6 +141,82 @@ def ingest_match_results(conn, match_df):
             cur.execute("UPDATE decks SET losses = losses + 1 WHERE deck_id = ?", (deck_id,))
 
     conn.commit()
+# -----------------------------
+# 6. MTGGoldfish scraping
+# -----------------------------
+
+BASE_URL = "https://www.mtggoldfish.com"
+
+
+def fetch_html(url):
+    r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+    r.raise_for_status()
+    return r.text
+
+
+def parse_tournament_decks(tournament_url):
+    """
+    Given a tournament URL, return a list of deck URLs.
+    Example tournament URL:
+    https://www.mtggoldfish.com/tournament/pro-tour-murders-at-karlov-manor#paper
+    """
+    html = fetch_html(tournament_url)
+    soup = BeautifulSoup(html, "html.parser")
+
+    deck_links = []
+    # MTGGoldfish uses links with /deck/ in href for deck pages
+    for a in soup.select("a[href*='/deck/']"):
+        href = a.get("href")
+        if "/deck/" in href and "#paper" not in href:
+            full_url = BASE_URL + href.split("#")[0]
+            if full_url not in deck_links:
+                deck_links.append(full_url)
+
+    return deck_links
+
+
+def parse_deck_page(deck_url):
+    """
+    Returns:
+      player, archetype, event_name, card_dict
+    card_dict = { "Card Name": count, ... }
+    """
+    html = fetch_html(deck_url)
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Title area usually contains event + archetype
+    title = soup.select_one("h1")
+    event_name = title.get_text(strip=True) if title else "Unknown Event"
+
+    # Player + archetype often in subtitle
+    subtitle = soup.select_one(".deck-view-title-subtitle")
+    player = "Unknown Player"
+    archetype = "Unknown Archetype"
+    if subtitle:
+        parts = [p.strip() for p in subtitle.get_text("•", strip=True).split("•") if p.strip()]
+        if len(parts) >= 1:
+            player = parts[0]
+        if len(parts) >= 2:
+            archetype = parts[1]
+
+    card_dict = {}
+
+    # Mainboard table
+    for row in soup.select("table.deck-view-deck-table tr"):
+        cols = row.find_all("td")
+        if len(cols) < 2:
+            continue
+        # First col: count, second: card name
+        try:
+            count = int(cols[0].get_text(strip=True))
+        except ValueError:
+            continue
+        name = cols[1].get_text(strip=True)
+        if not name:
+            continue
+        card_dict[name] = card_dict.get(name, 0) + count
+
+    return player, archetype, event_name, card_dict
 
 
 # -----------------------------
