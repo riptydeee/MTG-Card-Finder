@@ -2,6 +2,8 @@ import sqlite3
 import requests
 import os
 import pandas as pd
+import time
+time.sleep(0.5)
 from bs4 import BeautifulSoup
 from pathlib import Path
 
