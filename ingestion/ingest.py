@@ -168,22 +168,26 @@ def fetch_html(url):
 
 
 def parse_tournament_decks(tournament_url):
-    """
-    Given a tournament URL, return a list of deck URLs.
-    Example tournament URL:
-    https://www.mtggoldfish.com/tournament/pro-tour-murders-at-karlov-manor#paper
-    """
     html = fetch_html(tournament_url)
     soup = BeautifulSoup(html, "html.parser")
 
     deck_links = []
-    # MTGGoldfish uses links with /deck/ in href for deck pages
+
     for a in soup.select("a[href*='/deck/']"):
         href = a.get("href")
-        if "/deck/" in href and "#paper" not in href:
-            full_url = BASE_URL + href.split("#")[0]
-            if full_url not in deck_links:
-                deck_links.append(full_url)
+        if not href:
+            continue
+
+        # Skip visual pages
+        if "/deck/visual/" in href:
+            continue
+
+        # Normalize
+        href = href.split("#")[0]
+        full_url = BASE_URL + href
+
+        if full_url not in deck_links:
+            deck_links.append(full_url)
 
     return deck_links
 
