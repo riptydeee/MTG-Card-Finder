@@ -2,11 +2,13 @@ import os
 import time
 import sqlite3
 import requests
-import pandas as pd
-from pathlib import Path
+from bs4 import BeautifulSoup
 
 DB_PATH = "ingestion/cards.db"
 MELEE_BASE = "https://melee.gg"
+
+TARGET_EVENT_NAME = "2nd Chance PTQ - Sunday - (PT SOS)"
+TOURNAMENT_ID = 426359
 
 print("Writing DB to:", os.path.abspath(DB_PATH))
 
@@ -132,52 +134,66 @@ def fetch_json(url):
     return r.json()
 
 
-def get_tournament_decks(tournament_id):
+def get_tournament_structure(tournament_id):
     """
-    Returns a list of deck IDs from a Melee tournament.
+    Returns the full tournament JSON, including all sub-events.
     """
-    url = f"{MELEE_BASE}/api/tournament/426359/decklists"
-    data = fetch_json(url)
+    url = f"{MELEE_BASE}/api/tournament/{tournament_id}"
+    return fetch_json(url)
 
+
+def extract_standard_event(tournament_json):
+    """
+    Finds the sub-event whose name matches TARGET_EVENT_NAME.
+    """
+    events = tournament_json.get("events", [])
+
+    for ev in events:
+        name = ev.get("name", "")
+        if TARGET_EVENT_NAME.lower() in name.lower():
+            return ev
+
+    return None
+
+
+def extract_deck_ids_from_event(event_json):
+    """
+    Extracts deck IDs from the chosen sub-event.
+    """
     deck_ids = []
-    for entry in data.get("decklists", []):
-        deck_ids.append(entry["id"])
 
-    return deck_ids
+    rounds = event_json.get("rounds", [])
+    for rnd in rounds:
+        matches = rnd.get("matches", [])
+        for match in matches:
+            for player in match.get("players", []):
+                deck_id = player.get("decklistId")
+                if deck_id:
+                    deck_ids.append(deck_id)
+
+    return list(set(deck_ids))
 
 
 def fetch_melee_deck(deck_id):
-    """
-    Fetch a single deck from Melee.gg via JSON.
-    """
     url = f"{MELEE_BASE}/api/deck/{deck_id}"
     return fetch_json(url)
 
 
 def parse_melee_deck(json_data):
-    """
-    Extracts player, archetype, event, and card dict from Melee JSON.
-    """
     player = json_data.get("player", {}).get("gamerTag", "Unknown Player")
     archetype = json_data.get("archetype", "Unknown Archetype")
-    event = json_data.get("eventName", "Unknown Event")
+    event = json_data.get("eventName", TARGET_EVENT_NAME)
 
     wins = json_data.get("wins", 0)
     losses = json_data.get("losses", 0)
 
     card_dict = {}
 
-    # Mainboard
     for card in json_data.get("mainboard", []):
-        name = card["cardName"]
-        qty = card["quantity"]
-        card_dict[name] = card_dict.get(name, 0) + qty
+        card_dict[card["cardName"]] = card_dict.get(card["cardName"], 0) + card["quantity"]
 
-    # Sideboard
     for card in json_data.get("sideboard", []):
-        name = card["cardName"]
-        qty = card["quantity"]
-        card_dict[name] = card_dict.get(name, 0) + qty
+        card_dict[card["cardName"]] = card_dict.get(card["cardName"], 0) + card["quantity"]
 
     return player, archetype, event, wins, losses, card_dict
 
@@ -188,12 +204,17 @@ def parse_melee_deck(json_data):
 if __name__ == "__main__":
     conn = init_db()
 
-    # Example: Pro Tour Chicago on Melee
-    tournament_id = 12345  # Replace with real Melee tournament ID
-    print("Scraping Melee tournament:", tournament_id)
+    print(f"Scraping Melee tournament {TOURNAMENT_ID}...")
 
-    deck_ids = get_tournament_decks(tournament_id)
-    print(f"Found {len(deck_ids)} decks")
+    tournament_json = get_tournament_structure(TOURNAMENT_ID)
+
+    event_json = extract_standard_event(tournament_json)
+    if not event_json:
+        print("ERROR: Could not find Standard event:", TARGET_EVENT_NAME)
+        exit(1)
+
+    deck_ids = extract_deck_ids_from_event(event_json)
+    print(f"Found {len(deck_ids)} Standard decks")
 
     for i, deck_id in enumerate(deck_ids, start=1):
         print(f"[{i}/{len(deck_ids)}] Fetching deck:", deck_id)
