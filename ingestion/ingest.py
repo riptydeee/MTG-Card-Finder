@@ -2,6 +2,7 @@ import sqlite3
 import requests
 import os
 import pandas as pd
+from bs4 import BeautifulSoup
 from pathlib import Path
 
 # -----------------------------
