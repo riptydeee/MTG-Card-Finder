@@ -247,7 +247,7 @@ if __name__ == "__main__":
 
             print(f"  -> Ingested {len(card_dict)} cards for {player} ({archetype})")
 
-            time.sleep(1.0)
+            time.sleep(3)
 
         except Exception as e:
             print("  -> Error scraping deck:", e)
