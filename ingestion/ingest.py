@@ -1,20 +1,21 @@
 import sqlite3
 import requests
 import os
-import pandas as pd
 import time
-time.sleep(0.5)
-from bs4 import BeautifulSoup
+import pandas as pd
 from pathlib import Path
+from bs4 import BeautifulSoup
+
+DB_PATH = "ingestion/cards.db"
+BASE_URL = "https://www.mtggoldfish.com"
+
+print("Writing DB to:", os.path.abspath(DB_PATH))
 
 # -----------------------------
 # 1. DATABASE INITIALIZATION
 # -----------------------------
-print("Writing DB to:", os.path.abspath("ingestion/cards.db"))
-
-
-def init_db(db_path="ingestion/cards.db"):
-    conn = sqlite3.connect("ingestion/cards.db")
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
     cur.execute("""
@@ -55,9 +56,7 @@ def init_db(db_path="ingestion/cards.db"):
 # -----------------------------
 # 2. SCRYFALL CARD LOOKUP
 # -----------------------------
-
 def fetch_card_metadata(card_name):
-    """Fetch card metadata from Scryfall."""
     url = f"https://api.scryfall.com/cards/named?exact={card_name}"
     r = requests.get(url)
 
@@ -95,20 +94,14 @@ def store_card_metadata(conn, card_data):
 # -----------------------------
 # 3. INGEST DECKLISTS
 # -----------------------------
-
 def ingest_decklist(conn, deck_id, player, archetype, event, wins, losses, card_dict):
-    """
-    card_dict = { "Card Name": count, ... }
-    """
     cur = conn.cursor()
 
-    # Insert deck
     cur.execute("""
     INSERT OR REPLACE INTO decks (deck_id, player, archetype, event, wins, losses)
     VALUES (?, ?, ?, ?, ?, ?)
     """, (deck_id, player, archetype, event, wins, losses))
 
-    # Insert cards + deck_cards join
     for card_name, count in card_dict.items():
         metadata = fetch_card_metadata(card_name)
         if metadata:
@@ -123,33 +116,8 @@ def ingest_decklist(conn, deck_id, player, archetype, event, wins, losses, card_
 
 
 # -----------------------------
-# 4. INGEST MATCH RESULTS
+# 4. MTGGOLDFISH SCRAPING
 # -----------------------------
-
-def ingest_match_results(conn, match_df):
-    """
-    match_df columns:
-    deck_id, opponent_deck_id, result (W/L)
-    """
-    cur = conn.cursor()
-
-    for _, row in match_df.iterrows():
-        deck_id = row["deck_id"]
-        result = row["result"]
-
-        if result == "W":
-            cur.execute("UPDATE decks SET wins = wins + 1 WHERE deck_id = ?", (deck_id,))
-        else:
-            cur.execute("UPDATE decks SET losses = losses + 1 WHERE deck_id = ?", (deck_id,))
-
-    conn.commit()
-# -----------------------------
-# 6. MTGGoldfish scraping
-# -----------------------------
-
-BASE_URL = "https://www.mtggoldfish.com"
-
-
 def fetch_html(url):
     headers = {
         "User-Agent": (
@@ -158,10 +126,8 @@ def fetch_html(url):
             "Chrome/123.0 Safari/537.36"
         ),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Referer": "https://www.mtggoldfish.com/",
+        "Referer": "https://www.mtggoldfish.com/"
     }
-
     r = requests.get(url, headers=headers)
     r.raise_for_status()
     return r.text
@@ -178,11 +144,9 @@ def parse_tournament_decks(tournament_url):
         if not href:
             continue
 
-        # Skip visual pages
         if "/deck/visual/" in href:
             continue
 
-        # Normalize
         href = href.split("#")[0]
         full_url = BASE_URL + href
 
@@ -197,11 +161,8 @@ def parse_deck_page(deck_url):
     soup = BeautifulSoup(html, "html.parser")
 
     # Player + archetype
-    header = soup.select_one(".deck-view-title")
-    if header:
-        title_text = header.get_text(" ", strip=True)
-    else:
-        title_text = "Unknown Event"
+    title = soup.select_one(".deck-view-title")
+    event_name = title.get_text(" ", strip=True) if title else "Unknown Event"
 
     subtitle = soup.select_one(".deck-view-title-subtitle")
     if subtitle:
@@ -214,32 +175,31 @@ def parse_deck_page(deck_url):
 
     card_dict = {}
 
-    # Mainboard table
-    for row in soup.select("table.deck-view-deck-table tbody tr"):
-        cols = row.find_all("td")
-        if len(cols) < 2:
+    # NEW 2026 MTGGoldfish decklist structure
+    for row in soup.select(".deck-col"):
+        qty = row.select_one(".deck-col-qty")
+        name = row.select_one(".deck-col-card")
+
+        if not qty or not name:
             continue
 
         try:
-            count = int(cols[0].get_text(strip=True))
+            count = int(qty.get_text(strip=True))
         except:
             continue
 
-        name = cols[1].get_text(strip=True)
-        if name:
-            card_dict[name] = card_dict.get(name, 0) + count
+        card_name = name.get_text(strip=True)
+        card_dict[card_name] = card_dict.get(card_name, 0) + count
 
-    return player, archetype, title_text, card_dict
+    return player, archetype, event_name, card_dict
 
 
 # -----------------------------
-# 5. EXAMPLE USAGE
+# 5. MAIN INGESTION FLOW
 # -----------------------------
-
 if __name__ == "__main__":
     conn = init_db()
 
-    # Example: one MTGGoldfish tournament URL
     tournament_url = "https://www.mtggoldfish.com/tournament/pro-tour-murders-at-karlov-manor#paper"
     print("Scraping tournament:", tournament_url)
 
@@ -250,11 +210,13 @@ if __name__ == "__main__":
         print(f"[{i}/{len(deck_urls)}] Scraping deck:", deck_url)
         try:
             player, archetype, event_name, card_dict = parse_deck_page(deck_url)
+
             if not card_dict:
                 print("  -> No cards found, skipping")
                 continue
 
-            deck_id = deck_url.split("/")[-1]  # crude but stable enough
+            deck_id = deck_url.split("/")[-1]
+
             ingest_decklist(
                 conn,
                 deck_id=deck_id,
@@ -265,7 +227,11 @@ if __name__ == "__main__":
                 losses=0,
                 card_dict=card_dict
             )
-            print(f"  -> Ingested deck for {player} ({archetype}), {len(card_dict)} cards")
+
+            print(f"  -> Ingested {len(card_dict)} cards for {player} ({archetype})")
+
+            time.sleep(0.5)
+
         except Exception as e:
             print("  -> Error scraping deck:", e)
 
