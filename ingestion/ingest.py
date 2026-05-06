@@ -7,7 +7,7 @@ from pathlib import Path
 # 1. DATABASE INITIALIZATION
 # -----------------------------
 
-def init_db(db_path="cards.db"):
+def init_db(db_path="ingestion/cards.db"):
     conn = sqlite3.connect("ingestion/cards.db")
     cur = conn.cursor()
 
