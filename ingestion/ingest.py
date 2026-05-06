@@ -136,7 +136,7 @@ def get_tournament_decks(tournament_id):
     """
     Returns a list of deck IDs from a Melee tournament.
     """
-    url = f"{MELEE_BASE}/api/tournament/{tournament_id}/decklists"
+    url = f"{MELEE_BASE}/api/tournament/426359/decklists"
     data = fetch_json(url)
 
     deck_ids = []
