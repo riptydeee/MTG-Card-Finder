@@ -1,6 +1,10 @@
 import discord
 from discord import app_commands
 import sqlite3
+import os
+print("Bot DB path:", os.path.abspath(DB_PATH))
+print("DB exists:", os.path.exists(DB_PATH))
+print("DB size:", os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else "N/A")
 
 DB_PATH = "ingestion/cards.db"
 
