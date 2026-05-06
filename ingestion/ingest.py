@@ -8,7 +8,7 @@ from pathlib import Path
 # -----------------------------
 
 def init_db(db_path="cards.db"):
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect("ingestion/cards.db")
     cur = conn.cursor()
 
     cur.execute("""
