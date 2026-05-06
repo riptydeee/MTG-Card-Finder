@@ -1,5 +1,6 @@
 import sqlite3
 import requests
+import os
 import pandas as pd
 from pathlib import Path
 
