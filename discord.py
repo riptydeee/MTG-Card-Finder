@@ -40,7 +40,7 @@ def get_card_usage(card_name):
     return rows
 
 
-def get_top_cards(limit=10):
+def get_top_cards(limit=100):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
