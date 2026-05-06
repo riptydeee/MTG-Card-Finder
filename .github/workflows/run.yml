@@ -1,0 +1,60 @@
+name: Run Card Tracker
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"   # runs every day at 3 AM UTC
+
+jobs:
+  run-ingestion:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run ingestion script
+      run: |
+        python ingestion/ingest.py
+
+    - name: Upload database artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: cards-db
+        path: ingestion/cards.db
+
+  run-discord-bot:
+    if: ${{ false }}   # bots should NOT run inside CI; set to true if you insist
+    runs-on: ubuntu-latest
+    needs: run-ingestion
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+
+    - name: Run Discord bot
+      env:
+        DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+      run: |
+        python bot/bot.py
