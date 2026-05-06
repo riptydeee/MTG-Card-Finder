@@ -7,8 +7,8 @@ from bs4 import BeautifulSoup
 DB_PATH = "ingestion/cards.db"
 MELEE_BASE = "https://melee.gg"
 
-TARGET_EVENT_NAME = "2nd Chance PTQ - Sunday - (PT SOS)"
 TOURNAMENT_ID = 426359
+TARGET_EVENT_NAME = "2nd Chance PTQ - Sunday - (PT SOS)"
 
 print("Writing DB to:", os.path.abspath(DB_PATH))
 
@@ -122,122 +122,21 @@ def ingest_decklist(conn, deck_id, player, archetype, event, wins, losses, card_
 
 
 # -----------------------------
-# 4. MTG MELEE SCRAPING
+# 4. HTML SCRAPING HELPERS
 # -----------------------------
-def fetch_json(url):
+def fetch_html(url):
     headers = {
         "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json"
+        "Accept": "text/html"
     }
     r = requests.get(url, headers=headers)
     r.raise_for_status()
-    return r.json()
+    return r.text
 
 
-def get_tournament_structure(tournament_id):
-    """
-    Returns the full tournament JSON, including all sub-events.
-    """
-    url = f"{MELEE_BASE}/api/tournament/{tournament_id}"
-    return fetch_json(url)
+def parse_decklist_page(deck_url):
+    html = fetch_html(deck_url)
+    soup = BeautifulSoup(html, "html.parser")
 
-
-def extract_standard_event(tournament_json):
-    """
-    Finds the sub-event whose name matches TARGET_EVENT_NAME.
-    """
-    events = tournament_json.get("events", [])
-
-    for ev in events:
-        name = ev.get("name", "")
-        if TARGET_EVENT_NAME.lower() in name.lower():
-            return ev
-
-    return None
-
-
-def extract_deck_ids_from_event(event_json):
-    """
-    Extracts deck IDs from the chosen sub-event.
-    """
-    deck_ids = []
-
-    rounds = event_json.get("rounds", [])
-    for rnd in rounds:
-        matches = rnd.get("matches", [])
-        for match in matches:
-            for player in match.get("players", []):
-                deck_id = player.get("decklistId")
-                if deck_id:
-                    deck_ids.append(deck_id)
-
-    return list(set(deck_ids))
-
-
-def fetch_melee_deck(deck_id):
-    url = f"{MELEE_BASE}/api/deck/{deck_id}"
-    return fetch_json(url)
-
-
-def parse_melee_deck(json_data):
-    player = json_data.get("player", {}).get("gamerTag", "Unknown Player")
-    archetype = json_data.get("archetype", "Unknown Archetype")
-    event = json_data.get("eventName", TARGET_EVENT_NAME)
-
-    wins = json_data.get("wins", 0)
-    losses = json_data.get("losses", 0)
-
-    card_dict = {}
-
-    for card in json_data.get("mainboard", []):
-        card_dict[card["cardName"]] = card_dict.get(card["cardName"], 0) + card["quantity"]
-
-    for card in json_data.get("sideboard", []):
-        card_dict[card["cardName"]] = card_dict.get(card["cardName"], 0) + card["quantity"]
-
-    return player, archetype, event, wins, losses, card_dict
-
-
-# -----------------------------
-# 5. MAIN INGESTION FLOW
-# -----------------------------
-if __name__ == "__main__":
-    conn = init_db()
-
-    print(f"Scraping Melee tournament {TOURNAMENT_ID}...")
-
-    tournament_json = get_tournament_structure(TOURNAMENT_ID)
-
-    event_json = extract_standard_event(tournament_json)
-    if not event_json:
-        print("ERROR: Could not find Standard event:", TARGET_EVENT_NAME)
-        exit(1)
-
-    deck_ids = extract_deck_ids_from_event(event_json)
-    print(f"Found {len(deck_ids)} Standard decks")
-
-    for i, deck_id in enumerate(deck_ids, start=1):
-        print(f"[{i}/{len(deck_ids)}] Fetching deck:", deck_id)
-        try:
-            json_data = fetch_melee_deck(deck_id)
-            player, archetype, event, wins, losses, card_dict = parse_melee_deck(json_data)
-
-            ingest_decklist(
-                conn,
-                deck_id=str(deck_id),
-                player=player,
-                archetype=archetype,
-                event=event,
-                wins=wins,
-                losses=losses,
-                card_dict=card_dict
-            )
-
-            print(f"  -> Ingested {len(card_dict)} cards for {player} ({archetype})")
-
-            time.sleep(0.5)
-
-        except Exception as e:
-            print("  -> Error ingesting deck:", e)
-
-    print("Ingestion complete.")
+    # Player name
+    player_el = soup
