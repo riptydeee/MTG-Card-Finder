@@ -4,10 +4,9 @@ import sqlite3
 import requests
 import pandas as pd
 from pathlib import Path
-from bs4 import BeautifulSoup
 
 DB_PATH = "ingestion/cards.db"
-BASE_URL = "https://www.mtggoldfish.com"
+MELEE_BASE = "https://melee.gg"
 
 print("Writing DB to:", os.path.abspath(DB_PATH))
 
@@ -121,135 +120,103 @@ def ingest_decklist(conn, deck_id, player, archetype, event, wins, losses, card_
 
 
 # -----------------------------
-# 4. MTGGOLDFISH SCRAPING
+# 4. MTG MELEE SCRAPING
 # -----------------------------
-def fetch_html(url):
+def fetch_json(url):
     headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/123.0 Safari/537.36"
-        ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Referer": "https://www.mtggoldfish.com/"
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json"
     }
     r = requests.get(url, headers=headers)
     r.raise_for_status()
-    return r.text
+    return r.json()
 
 
-def parse_tournament_decks(tournament_url):
-    html = fetch_html(tournament_url)
-    soup = BeautifulSoup(html, "html.parser")
+def get_tournament_decks(tournament_id):
+    """
+    Returns a list of deck IDs from a Melee tournament.
+    """
+    url = f"{MELEE_BASE}/api/tournament/{tournament_id}/decklists"
+    data = fetch_json(url)
 
-    deck_links = []
+    deck_ids = []
+    for entry in data.get("decklists", []):
+        deck_ids.append(entry["id"])
 
-    for a in soup.select("a[href*='/deck/']"):
-        href = a.get("href")
-        if not href:
-            continue
-
-        if "/deck/visual/" in href:
-            continue
-
-        href = href.split("#")[0]
-        full_url = BASE_URL + href
-
-        if full_url not in deck_links:
-            deck_links.append(full_url)
-
-    return deck_links
+    return deck_ids
 
 
-# -----------------------------
-# 5. CARD PARSER (2026 STRUCTURE)
-# -----------------------------
-def parse_cards_from_deck(soup):
+def fetch_melee_deck(deck_id):
+    """
+    Fetch a single deck from Melee.gg via JSON.
+    """
+    url = f"{MELEE_BASE}/api/deck/{deck_id}"
+    return fetch_json(url)
+
+
+def parse_melee_deck(json_data):
+    """
+    Extracts player, archetype, event, and card dict from Melee JSON.
+    """
+    player = json_data.get("player", {}).get("gamerTag", "Unknown Player")
+    archetype = json_data.get("archetype", "Unknown Archetype")
+    event = json_data.get("eventName", "Unknown Event")
+
+    wins = json_data.get("wins", 0)
+    losses = json_data.get("losses", 0)
+
     card_dict = {}
 
-    rows = soup.select(".deck-view-card-row")
+    # Mainboard
+    for card in json_data.get("mainboard", []):
+        name = card["cardName"]
+        qty = card["quantity"]
+        card_dict[name] = card_dict.get(name, 0) + qty
 
-    for row in rows:
-        qty_el = row.select_one(".deck-col-qty")
-        name_el = row.select_one(".deck-col-card")
+    # Sideboard
+    for card in json_data.get("sideboard", []):
+        name = card["cardName"]
+        qty = card["quantity"]
+        card_dict[name] = card_dict.get(name, 0) + qty
 
-        if not qty_el or not name_el:
-            continue
-
-        qty_text = qty_el.get_text(strip=True).replace("x", "")
-        name_text = name_el.get_text(strip=True)
-
-        try:
-            qty = int(qty_text)
-        except:
-            continue
-
-        card_dict[name_text] = card_dict.get(name_text, 0) + qty
-
-    return card_dict
-
-
-def parse_deck_page(deck_url):
-    html = fetch_html(deck_url)
-    soup = BeautifulSoup(html, "html.parser")
-
-    title = soup.select_one(".deck-view-title")
-    event_name = title.get_text(" ", strip=True) if title else "Unknown Event"
-
-    subtitle = soup.select_one(".deck-view-title-subtitle")
-    if subtitle:
-        parts = [p.strip() for p in subtitle.get_text("•", strip=True).split("•") if p.strip()]
-        player = parts[0] if len(parts) > 0 else "Unknown Player"
-        archetype = parts[1] if len(parts) > 1 else "Unknown Archetype"
-    else:
-        player = "Unknown Player"
-        archetype = "Unknown Archetype"
-
-    card_dict = parse_cards_from_deck(soup)
-
-    return player, archetype, event_name, card_dict
+    return player, archetype, event, wins, losses, card_dict
 
 
 # -----------------------------
-# 6. MAIN INGESTION FLOW
+# 5. MAIN INGESTION FLOW
 # -----------------------------
 if __name__ == "__main__":
     conn = init_db()
 
-    tournament_url = "https://www.mtggoldfish.com/tournament/pro-tour-murders-at-karlov-manor#paper"
-    print("Scraping tournament:", tournament_url)
+    # Example: Pro Tour Chicago on Melee
+    tournament_id = 12345  # Replace with real Melee tournament ID
+    print("Scraping Melee tournament:", tournament_id)
 
-    deck_urls = parse_tournament_decks(tournament_url)
-    print(f"Found {len(deck_urls)} decks")
+    deck_ids = get_tournament_decks(tournament_id)
+    print(f"Found {len(deck_ids)} decks")
 
-    for i, deck_url in enumerate(deck_urls, start=1):
-        print(f"[{i}/{len(deck_urls)}] Scraping deck:", deck_url)
+    for i, deck_id in enumerate(deck_ids, start=1):
+        print(f"[{i}/{len(deck_ids)}] Fetching deck:", deck_id)
         try:
-            player, archetype, event_name, card_dict = parse_deck_page(deck_url)
-
-            if not card_dict:
-                print("  -> No cards found, skipping")
-                continue
-
-            deck_id = deck_url.split("/")[-1]
+            json_data = fetch_melee_deck(deck_id)
+            player, archetype, event, wins, losses, card_dict = parse_melee_deck(json_data)
 
             ingest_decklist(
                 conn,
-                deck_id=deck_id,
+                deck_id=str(deck_id),
                 player=player,
                 archetype=archetype,
-                event=event_name,
-                wins=0,
-                losses=0,
+                event=event,
+                wins=wins,
+                losses=losses,
                 card_dict=card_dict
             )
 
             print(f"  -> Ingested {len(card_dict)} cards for {player} ({archetype})")
 
-            time.sleep(3)
+            time.sleep(0.5)
 
         except Exception as e:
-            print("  -> Error scraping deck:", e)
+            print("  -> Error ingesting deck:", e)
 
     print("Ingestion complete.")
