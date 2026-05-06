@@ -226,31 +226,34 @@ def parse_deck_page(deck_url):
 if __name__ == "__main__":
     conn = init_db()
 
-    # Example decklist
-    deck_cards = {
-        "Sheoldred, the Apocalypse": 2,
-        "Cut Down": 4,
-        "Go for the Throat": 3,
-        "Liliana of the Veil": 2
-    }
+    # Example: one MTGGoldfish tournament URL
+    tournament_url = "https://www.mtggoldfish.com/tournament/pro-tour-murders-at-karlov-manor#paper"
+    print("Scraping tournament:", tournament_url)
 
-    ingest_decklist(
-        conn,
-        deck_id="protour_001",
-        player="Reid Duke",
-        archetype="Black Midrange",
-        event="Pro Tour Chicago",
-        wins=0,
-        losses=0,
-        card_dict=deck_cards
-    )
+    deck_urls = parse_tournament_decks(tournament_url)
+    print(f"Found {len(deck_urls)} decks")
 
-    # Example match results
-    match_data = pd.DataFrame([
-        {"deck_id": "protour_001", "opponent_deck_id": "protour_002", "result": "W"},
-        {"deck_id": "protour_001", "opponent_deck_id": "protour_003", "result": "L"},
-    ])
+    for i, deck_url in enumerate(deck_urls, start=1):
+        print(f"[{i}/{len(deck_urls)}] Scraping deck:", deck_url)
+        try:
+            player, archetype, event_name, card_dict = parse_deck_page(deck_url)
+            if not card_dict:
+                print("  -> No cards found, skipping")
+                continue
 
-    ingest_match_results(conn, match_data)
+            deck_id = deck_url.split("/")[-1]  # crude but stable enough
+            ingest_decklist(
+                conn,
+                deck_id=deck_id,
+                player=player,
+                archetype=archetype,
+                event=event_name,
+                wins=0,
+                losses=0,
+                card_dict=card_dict
+            )
+            print(f"  -> Ingested deck for {player} ({archetype}), {len(card_dict)} cards")
+        except Exception as e:
+            print("  -> Error scraping deck:", e)
 
     print("Ingestion complete.")
